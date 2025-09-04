@@ -131,7 +131,7 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # In development (DEBUG=True), fall back to SQLite unless DATABASE_URL is provided.
 DATABASES = {}
 
-DATABASE_URL = os.getenv('postgresql://smartpg_postgres_user:tsW5dKzDdH4AA2Grn5eUv1GXl7XAaXM9@dpg-d2spquu3jp1c73b43pog-a/smartpg_postgres')
+DATABASE_URL = os.getenv('DATABASE_URL')
 if not DEBUG:
     if DATABASE_URL and dj_database_url:
         DATABASES['default'] = dj_database_url.parse(
