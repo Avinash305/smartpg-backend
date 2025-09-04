@@ -21,7 +21,8 @@ from .permissions import IsOwnerOrPGAdmin, IsSuperUser, CanAssignData
 from .utils import set_user_email_otp, send_email_otp, set_email_otp_for
 from datetime import timedelta
 from django.contrib.auth.hashers import make_password
-from subscription.utils import ensure_limit_not_exceeded, ensure_feature
+from subscription.utils import ensure_limit_not_exceeded, ensure_feature, compute_period_end
+from subscription.models import SubscriptionPlan, Subscription
 
 User = get_user_model()
 
@@ -375,6 +376,53 @@ class VerifyEmailOTPView(APIView):
             # Set password hash directly
             user.password = pending.password_hash
             user.save()
+
+            # Auto-start default free trial for new PG Admins
+            try:
+                if (user.role or 'pg_admin') == 'pg_admin':
+                    # Only if no subscription exists yet
+                    has_any_sub = Subscription.objects.filter(owner=user).exists()
+                    if not has_any_sub:
+                        plan = (
+                            SubscriptionPlan.objects.filter(is_active=True, slug='basic').first()
+                            or SubscriptionPlan.objects.filter(is_active=True).order_by('price_monthly', 'id').first()
+                        )
+                        if plan:
+                            now = timezone.now()
+                            trial_end = compute_period_end(now, '14d')
+                            plan_limits = dict(plan.limits or {})
+                            trial_limits = dict(plan_limits)
+                            trial_limits.update({
+                                'buildings': 1,
+                                'max_buildings': 1,
+                                'staff': 1,
+                                'max_staff': 1,
+                                'floors': 5,
+                                'max_floors': 5,
+                                'rooms': 5,
+                                'max_rooms': 5,
+                                'beds': 7,
+                                'max_beds': 7,
+                            })
+                            Subscription.objects.create(
+                                owner=user,
+                                plan=plan,
+                                status='trialing',
+                                billing_interval='14d',
+                                current_period_start=now,
+                                current_period_end=trial_end,
+                                trial_end=trial_end,
+                                cancel_at_period_end=False,
+                                is_current=True,
+                                meta={
+                                    'trial_days': 14,
+                                    'features': dict(plan.features or {}),
+                                    'limits': trial_limits,
+                                },
+                            )
+            except Exception:
+                # Do not block account creation if trial setup fails
+                pass
 
             # Clean up pending
             PendingRegistration.objects.filter(pk=pending.pk).delete()
