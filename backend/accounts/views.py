@@ -23,6 +23,7 @@ from datetime import timedelta
 from django.contrib.auth.hashers import make_password
 from subscription.utils import ensure_limit_not_exceeded, ensure_feature, compute_period_end
 from subscription.models import SubscriptionPlan, Subscription
+import logging
 
 User = get_user_model()
 
@@ -420,9 +421,10 @@ class VerifyEmailOTPView(APIView):
                                     'limits': trial_limits,
                                 },
                             )
-            except Exception:
-                # Do not block account creation if trial setup fails
-                pass
+                        else:
+                            logging.getLogger(__name__).warning("No active SubscriptionPlan found to start trial for user %s", user.id)
+            except Exception as e:
+                logging.getLogger(__name__).exception("Failed to auto-start trial for user %s: %s", user.id, e)
 
             # Clean up pending
             PendingRegistration.objects.filter(pk=pending.pk).delete()
@@ -448,6 +450,54 @@ class VerifyEmailOTPView(APIView):
         user.email_otp_expires_at = None
         user.email_otp_attempts = 0
         user.save(update_fields=['email_verified', 'email_otp', 'email_otp_expires_at', 'email_otp_attempts'])
+
+        # Auto-start default free trial for legacy verification path as well
+        try:
+            if (user.role or 'pg_admin') == 'pg_admin':
+                has_any_sub = Subscription.objects.filter(owner=user).exists()
+                if not has_any_sub:
+                    plan = (
+                        SubscriptionPlan.objects.filter(is_active=True, slug='basic').first()
+                        or SubscriptionPlan.objects.filter(is_active=True).order_by('price_monthly', 'id').first()
+                    )
+                    if plan:
+                        now = timezone.now()
+                        trial_end = compute_period_end(now, '14d')
+                        plan_limits = dict(plan.limits or {})
+                        trial_limits = dict(plan_limits)
+                        trial_limits.update({
+                            'buildings': 1,
+                            'max_buildings': 1,
+                            'staff': 1,
+                            'max_staff': 1,
+                            'floors': 5,
+                            'max_floors': 5,
+                            'rooms': 5,
+                            'max_rooms': 5,
+                            'beds': 7,
+                            'max_beds': 7,
+                        })
+                        Subscription.objects.create(
+                            owner=user,
+                            plan=plan,
+                            status='trialing',
+                            billing_interval='14d',
+                            current_period_start=now,
+                            current_period_end=trial_end,
+                            trial_end=trial_end,
+                            cancel_at_period_end=False,
+                            is_current=True,
+                            meta={
+                                'trial_days': 14,
+                                'features': dict(plan.features or {}),
+                                'limits': trial_limits,
+                            },
+                        )
+                    else:
+                        logging.getLogger(__name__).warning("No active SubscriptionPlan found to start trial (legacy verify) for user %s", user.id)
+        except Exception as e:
+            logging.getLogger(__name__).exception("Failed to auto-start trial (legacy verify) for user %s: %s", user.id, e)
+
         return Response({'detail': 'Email verified successfully'}, status=status.HTTP_200_OK)
 
 class ResendEmailOTPView(APIView):
