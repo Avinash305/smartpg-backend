@@ -37,7 +37,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'dev-insecure-key-change-me')
 # DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
+ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1', 'smartpg-backend.onrender.com', 'https://smartpg-backend.onrender.com/').split(',') if h.strip()]
 
 # Fail fast if critical settings are missing in production
 if not DEBUG and (not SECRET_KEY or SECRET_KEY == 'dev-insecure-key-change-me'):
@@ -47,7 +47,7 @@ if not DEBUG and not ALLOWED_HOSTS:
 
 CORS_ALLOWED_ORIGINS = [
     *(o.strip() for o in os.getenv(
-        'CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,https://smartpg.netlify.app, https://smartpg-backend.onrender.com',
+        'CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,https://smartpg.netlify.app, https://smartpg-backend.onrender.com, "smartpg-backend.onrender.com",',
     ).split(',') if o.strip())
 ]
 # Allow sending cookies with CORS if explicitly enabled via env
@@ -55,7 +55,7 @@ CORS_ALLOW_CREDENTIALS = os.getenv('CORS_ALLOW_CREDENTIALS', 'False').lower() ==
 
 CSRF_TRUSTED_ORIGINS = [
     *(o.strip() for o in os.getenv(
-        'CSRF_TRUSTED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,https://smartpg.netlify.app, https://smartpg-backend.onrender.com'
+        'CSRF_TRUSTED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,https://smartpg.netlify.app, https://smartpg-backend.onrender.com, "smartpg-backend.onrender.com"'
     ).split(',') if o.strip())
 ]
 
