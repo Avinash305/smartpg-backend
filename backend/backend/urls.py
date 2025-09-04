@@ -40,6 +40,8 @@ urlpatterns = [
     path('api/dashboard/cashflow/', CashflowView.as_view()),
     # Health & Metrics
     path('health/', health_view),
+    # Root landing endpoint
+    path('', lambda _r: JsonResponse({'service': 'smartpg-backend', 'status': 'ok'})),
     path('', include('django_prometheus.urls')),  # exposes /metrics
 ]
 
