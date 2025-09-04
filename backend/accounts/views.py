@@ -378,6 +378,13 @@ class VerifyEmailOTPView(APIView):
             user.password = pending.password_hash
             user.save()
 
+            # Ensure default localization settings exist for new PG Admins
+            try:
+                if (user.role or 'pg_admin') == 'pg_admin':
+                    LocalizationSettings.objects.get_or_create(owner=user)
+            except Exception:
+                pass
+
             # Auto-start default free trial for new PG Admins
             try:
                 if (user.role or 'pg_admin') == 'pg_admin':
@@ -450,6 +457,13 @@ class VerifyEmailOTPView(APIView):
         user.email_otp_expires_at = None
         user.email_otp_attempts = 0
         user.save(update_fields=['email_verified', 'email_otp', 'email_otp_expires_at', 'email_otp_attempts'])
+
+        # Ensure default localization settings exist for PG Admins (legacy path)
+        try:
+            if (user.role or 'pg_admin') == 'pg_admin':
+                LocalizationSettings.objects.get_or_create(owner=user)
+        except Exception:
+            pass
 
         # Auto-start default free trial for legacy verification path as well
         try:
