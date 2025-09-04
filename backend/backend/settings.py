@@ -37,7 +37,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'dev-insecure-key-change-me')
 # DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1', 'smartpg-backend.onrender.com', 'https://smartpg-backend.onrender.com/').split(',') if h.strip()]
+ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
 
 # Fail fast if critical settings are missing in production
 if not DEBUG and (not SECRET_KEY or SECRET_KEY == 'dev-insecure-key-change-me'):
