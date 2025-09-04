@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.celery import CeleryIntegration
+from django.core.exceptions import ImproperlyConfigured
 
 try:
     import dj_database_url  # for DATABASE_URL parsing in production
@@ -34,15 +35,23 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'dev-insecure-key-change-me')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
-DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
 ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
+
+# Fail fast if critical settings are missing in production
+if not DEBUG and (not SECRET_KEY or SECRET_KEY == 'dev-insecure-key-change-me'):
+    raise ImproperlyConfigured('SECRET_KEY must be set to a strong value in production (set SECRET_KEY env).')
+if not DEBUG and not ALLOWED_HOSTS:
+    raise ImproperlyConfigured('ALLOWED_HOSTS must be configured in production (set ALLOWED_HOSTS env).')
 
 CORS_ALLOWED_ORIGINS = [
     *(o.strip() for o in os.getenv(
         'CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,https://smartpg.netlify.app',
     ).split(',') if o.strip())
 ]
+# Allow sending cookies with CORS if explicitly enabled via env
+CORS_ALLOW_CREDENTIALS = os.getenv('CORS_ALLOW_CREDENTIALS', 'False').lower() == 'true'
 
 CSRF_TRUSTED_ORIGINS = [
     *(o.strip() for o in os.getenv(
@@ -118,30 +127,52 @@ TEMPLATES = [
 WSGI_APPLICATION = 'backend.wsgi.application'
 
 # Database
-# Use DATABASE_URL if present (recommended in production), otherwise PostgreSQL for dev.
-# SQLite (Enabled)
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
+# Prefer PostgreSQL in production. Use DATABASE_URL if present; otherwise require POSTGRES_* vars.
+# In development (DEBUG=True), fall back to SQLite unless DATABASE_URL is provided.
+DATABASES = {}
 
-# # PostgreSQL (requires: pip install psycopg[binary] or psycopg2-binary)
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': os.getenv('POSTGRES_DB', 'pgms'),
-#         'USER': os.getenv('POSTGRES_USER', 'postgres'),
-#         'PASSWORD': os.getenv('POSTGRES_PASSWORD', ''),
-#         'HOST': os.getenv('POSTGRES_HOST', '127.0.0.1'),
-#         'PORT': os.getenv('POSTGRES_PORT', '5432'),
-#     }
-# }
-
-DATABASE_URL = os.getenv('DATABASE_URL')
-if DATABASE_URL and dj_database_url:
-    DATABASES['default'] = dj_database_url.parse(DATABASE_URL, conn_max_age=600, ssl_require=os.getenv('DB_SSL', 'True').lower() == 'true')
+DATABASE_URL = os.getenv('postgresql://smartpg_postgres_user:tsW5dKzDdH4AA2Grn5eUv1GXl7XAaXM9@dpg-d2spquu3jp1c73b43pog-a/smartpg_postgres')
+if not DEBUG:
+    if DATABASE_URL and dj_database_url:
+        DATABASES['default'] = dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=int(os.getenv('DB_CONN_MAX_AGE', '600')),
+            ssl_require=os.getenv('DB_SSL', 'True').lower() == 'true',
+        )
+    else:
+        required = ['POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD', 'POSTGRES_HOST']
+        if not all(os.getenv(k) for k in required):
+            raise ImproperlyConfigured(
+                'In production, configure DATABASE_URL or all POSTGRES_* env vars.'
+            )
+        DATABASES['default'] = {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('POSTGRES_DB'),
+            'USER': os.getenv('POSTGRES_USER'),
+            'PASSWORD': os.getenv('POSTGRES_PASSWORD'),
+            'HOST': os.getenv('POSTGRES_HOST'),
+            'PORT': os.getenv('POSTGRES_PORT', '5432'),
+            'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '600')),
+            'OPTIONS': {
+                'sslmode': 'require' if os.getenv('DB_SSL', 'True').lower() == 'true' else 'prefer',
+            },
+        }
+else:
+    if DATABASE_URL and dj_database_url:
+        # Allow DATABASE_URL in dev too (no SSL, no persistent connections by default)
+        DATABASES['default'] = dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=0,
+            ssl_require=False,
+        )
+    else:
+        # Dev default: SQLite
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.sqlite3',
+                'NAME': BASE_DIR / 'db.sqlite3',
+            }
+        }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -267,8 +298,20 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    # Additional hardened headers
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = os.getenv('X_FRAME_OPTIONS', 'DENY')
+    SECURE_REFERRER_POLICY = os.getenv('SECURE_REFERRER_POLICY', 'strict-origin-when-cross-origin')
+    # Cookie policies
+    SESSION_COOKIE_SAMESITE = os.getenv('SESSION_COOKIE_SAMESITE', 'Lax')
+    CSRF_COOKIE_SAMESITE = os.getenv('CSRF_COOKIE_SAMESITE', 'Lax')
+    CSRF_COOKIE_HTTPONLY = True
+    # Trust X-Forwarded-Host when behind a reverse proxy (optional)
+    USE_X_FORWARDED_HOST = os.getenv('USE_X_FORWARDED_HOST', 'True').lower() == 'true'
     # WhiteNoise hashed static files
     STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+    # WhiteNoise cache max-age (seconds)
+    WHITENOISE_MAX_AGE = int(os.getenv('WHITENOISE_MAX_AGE', str(60 * 60 * 24 * 30)))  # 30 days
 
 # --- Celery / Redis configuration ---
 # Use environment variables if provided, else defaults for local dev
