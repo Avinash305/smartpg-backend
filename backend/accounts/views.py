@@ -243,9 +243,7 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_update(self, serializer):
         """
-        Enforce subscription feature gating for staff profile picture uploads.
-        If the incoming request attempts to set/replace 'profile_picture', require 'staff_media'.
-        Deletions (clearing the field) are allowed without the feature.
+        Profile picture uploads are free for all authenticated users; no subscription gating.
         """
         request = self.request
         # Detect if a new file is being uploaded or a non-empty value is being set
@@ -261,13 +259,6 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance = serializer.instance
         old_file = getattr(instance, 'profile_picture', None)
         old_name = getattr(old_file, 'name', None)
-
-        if sets_non_empty:
-            try:
-                ensure_feature(request.user, 'staff_media')
-            except PermissionDenied:
-                # Show a friendly, specific message for the UI
-                raise PermissionDenied('Upgrade plan to upload profile picture.')
 
         # Perform save first
         serializer.save()

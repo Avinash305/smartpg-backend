@@ -51,6 +51,8 @@ class SubscriptionPlanAdminForm(forms.ModelForm):
     limit_rooms_count = forms.IntegerField(required=False, min_value=0, label='Rooms: Count')
     limit_beds_unlimited = forms.BooleanField(required=False, label='Beds: Unlimited')
     limit_beds_count = forms.IntegerField(required=False, min_value=0, label='Beds: Count')
+    limit_bookings_unlimited = forms.BooleanField(required=False, label='Bookings: Unlimited')
+    limit_bookings_count = forms.IntegerField(required=False, min_value=0, label='Bookings: Count')
     limit_invoices_per_month_unlimited = forms.BooleanField(required=False, label='Invoices/month: Unlimited')
     limit_invoices_per_month_count = forms.IntegerField(required=False, min_value=0, label='Invoices/month: Count')
     bm_max_files_unlimited = forms.BooleanField(required=False, label='Bookings media: Files per booking Unlimited')
@@ -160,6 +162,7 @@ class SubscriptionPlanAdminForm(forms.ModelForm):
         init_limit_pair('floors', 'limit_floors_unlimited', 'limit_floors_count')
         init_limit_pair('rooms', 'limit_rooms_unlimited', 'limit_rooms_count')
         init_limit_pair('beds', 'limit_beds_unlimited', 'limit_beds_count')
+        init_limit_pair('bookings', 'limit_bookings_unlimited', 'limit_bookings_count')
         # Nested helpers for limits like invoices.max_per_month and bookings_media.*
         def get_nested(dct: dict, dotted: str, default=None):
             node = dct
@@ -264,6 +267,7 @@ class SubscriptionPlanAdminForm(forms.ModelForm):
         apply_pair('floors', 'limit_floors_unlimited', 'limit_floors_count', 'Floors')
         apply_pair('rooms', 'limit_rooms_unlimited', 'limit_rooms_count', 'Rooms')
         apply_pair('beds', 'limit_beds_unlimited', 'limit_beds_count', 'Beds')
+        apply_pair('bookings', 'limit_bookings_unlimited', 'limit_bookings_count', 'Bookings')
 
         # Nested setter
         def set_nested(dct: dict, dotted: str, value):
