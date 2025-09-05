@@ -24,7 +24,7 @@ def get_current_subscription(owner) -> Optional[Subscription]:
 
 
 def subscription_is_valid(sub: Subscription) -> bool:
-    """Return True only for active/trialing subscriptions that are not expired.
+    """Return True only for active subscriptions that are not expired.
     If current_period_end is missing, compute it from start and billing interval.
     Any error results in a conservative False (treat as invalid).
     """
@@ -32,7 +32,7 @@ def subscription_is_valid(sub: Subscription) -> bool:
         if not sub:
             return False
         status_lc = (getattr(sub, 'status', '') or '').lower()
-        if status_lc not in ('active', 'trialing'):
+        if status_lc != 'active':
             return False
         end = getattr(sub, 'current_period_end', None)
         if not end:

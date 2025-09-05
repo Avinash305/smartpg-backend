@@ -8,7 +8,6 @@ from .views import (
     CouponPreviewView,
     RazorpayCreateOrderView,
     RazorpayVerifyPaymentView,
-    StartTrialView,
 )
 
 urlpatterns = [
@@ -20,5 +19,4 @@ urlpatterns = [
     path('coupon/preview/', CouponPreviewView.as_view(), name='subscription-coupon-preview'),
     path('razorpay/create-order/', RazorpayCreateOrderView.as_view(), name='subscription-razorpay-create-order'),
     path('razorpay/verify/', RazorpayVerifyPaymentView.as_view(), name='subscription-razorpay-verify'),
-    path('start-trial/', StartTrialView.as_view(), name='subscription-start-trial'),
 ]

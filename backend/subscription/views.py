@@ -58,14 +58,65 @@ class CurrentSubscriptionView(APIView):
             except Exception:
                 pass
         if not sub:
-            return Response({'detail': 'No current subscription'}, status=status.HTTP_404_NOT_FOUND)
-        # Enforce only active/trialing and non-expired subscriptions as valid "current"
+            # One-time default 1-month free subscription for first-time owners
+            if not Subscription.objects.filter(owner=owner).exists():
+                plan = SubscriptionPlan.objects.filter(is_active=True).order_by('price_monthly', 'id').first()
+                if not plan:
+                    return Response({'detail': 'No active plans available'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                now = timezone.now()
+                period_end = compute_period_end(now, '1m')
+                # Prepare strict free-month limits
+                base_limits = dict(plan.limits or {})
+                free_limits = dict(base_limits)
+                free_limits.update({
+                    'buildings': 1,
+                    'max_buildings': 1,
+                    'staff': 1,
+                    'max_staff': 1,
+                    'floors': 5,
+                    'max_floors': 5,
+                    'rooms': 5,
+                    'max_rooms': 5,
+                    'beds': 5,
+                    'max_beds': 5,
+                    'tenants': 100,
+                    'max_tenants': 100,
+                })
+                with transaction.atomic():
+                    sub = Subscription.objects.create(
+                        owner=owner,
+                        plan=plan,
+                        status='active',
+                        billing_interval='1m',
+                        current_period_start=now,
+                        current_period_end=period_end,
+                        trial_end=None,
+                        cancel_at_period_end=False,
+                        is_current=True,
+                        meta={
+                            'free_month': True,
+                            'free_started_at': now.isoformat(),
+                            'free_ends_at': period_end.isoformat(),
+                            'features': dict(plan.features or {}),
+                            'limits': free_limits,
+                        },
+                    )
+            else:
+                return Response({'detail': 'No current subscription'}, status=status.HTTP_404_NOT_FOUND)
+        # Enforce only active subscriptions as valid "current"
         try:
             now = timezone.now()
             status_lc = (sub.status or '').lower()
-            if status_lc not in ('active', 'trialing'):
+            if status_lc != 'active':
                 return Response({'detail': 'Subscription inactive'}, status=status.HTTP_404_NOT_FOUND)
             if sub.current_period_end and sub.current_period_end <= now:
+                # Auto-mark expired and clear current flag
+                try:
+                    sub.status = 'expired'
+                    sub.is_current = False
+                    sub.save(update_fields=['status', 'is_current', 'updated_at'])
+                except Exception:
+                    pass
                 return Response({'detail': 'Subscription expired'}, status=status.HTTP_404_NOT_FOUND)
         except Exception:
             # If anything goes wrong determining state, be safe and hide subscription
@@ -167,7 +218,7 @@ class ChangePlanView(APIView):
                 meta['applied_coupon'] = applied
             else:
                 meta.pop('applied_coupon', None)
-            for k in ('trial_days', 'features', 'limits'):
+            for k in ('trial_days', 'features', 'limits', 'free_month', 'free_started_at', 'free_ends_at'):
                 if k in meta:
                     meta.pop(k, None)
             sub.meta = meta
@@ -329,6 +380,17 @@ class RazorpayCreateOrderView(APIView):
         existing_sub = Subscription.objects.filter(owner=owner, is_current=True).first()
         if not existing_sub:
             return Response({"detail": "No current subscription"}, status=status.HTTP_404_NOT_FOUND)
+
+        # Block payment initiation during active free month
+        try:
+            if isinstance(existing_sub.meta, dict) and existing_sub.meta.get('free_month'):
+                now_chk = timezone.now()
+                if existing_sub.current_period_end and existing_sub.current_period_end > now_chk and (existing_sub.status or '').lower() == 'active':
+                    return Response({
+                        "detail": "Payment is disabled during your one-month free period. You can upgrade once the free period ends."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            pass
 
         # Preflight: block orders for plans below current active building count
         used_active = _Building().objects.filter(owner=owner, is_active=True).count()
@@ -578,7 +640,7 @@ class RazorpayVerifyPaymentView(APIView):
                 meta['applied_coupon'] = applied
             else:
                 meta.pop('applied_coupon', None)
-            for k in ('trial_days', 'features', 'limits'):
+            for k in ('trial_days', 'features', 'limits', 'free_month', 'free_started_at', 'free_ends_at'):
                 if k in meta:
                     meta.pop(k, None)
             sub.meta = meta
@@ -601,65 +663,5 @@ class StartTrialView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        # Only PG Admin can start a trial
-        if getattr(request.user, 'role', None) == 'pg_staff':
-            return Response({"detail": "Only PG Admin can start a trial"}, status=status.HTTP_403_FORBIDDEN)
-        owner = resolve_owner(request.user)
-
-        # Ensure trial is only available once per owner (no prior subscriptions of any status)
-        if Subscription.objects.filter(owner=owner).exists():
-            return Response({"detail": "Trial not available. An existing subscription record was found for this account."}, status=status.HTTP_400_BAD_REQUEST)
-
-        slug = request.data.get('plan_slug')
-        plan_id = request.data.get('plan_id')
-        if not slug and not plan_id:
-            return Response({"detail": "plan_slug or plan_id required to start trial"}, status=status.HTTP_400_BAD_REQUEST)
-
-        plan_qs = SubscriptionPlan.objects.filter(is_active=True)
-        plan = plan_qs.filter(slug=slug).first() if slug else plan_qs.filter(id=plan_id).first()
-        if not plan:
-            return Response({"detail": "Plan not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        now = timezone.now()
-        trial_end = compute_period_end(now, '14d')
-
-        # Prepare trial limits (override plan limits with stricter trial caps)
-        plan_limits = dict(plan.limits or {})
-        trial_limits = dict(plan_limits)
-        trial_limits.update({
-            # Buildings
-            'buildings': 1,
-            'max_buildings': 1,
-            # Staff
-            'staff': 1,
-            'max_staff': 1,
-            # Floors
-            'floors': 5,
-            'max_floors': 5,
-            # Rooms
-            'rooms': 5,
-            'max_rooms': 5,
-            # Beds
-            'beds': 7,
-            'max_beds': 7,
-        })
-
-        with transaction.atomic():
-            sub = Subscription.objects.create(
-                owner=owner,
-                plan=plan,
-                status='trialing',
-                billing_interval='14d',
-                current_period_start=now,
-                current_period_end=trial_end,
-                trial_end=trial_end,
-                cancel_at_period_end=False,
-                is_current=True,
-                meta={
-                    "trial_days": 14,
-                    "features": dict(plan.features or {}),
-                    "limits": trial_limits,
-                },
-            )
-
-        return Response(SubscriptionSerializer(sub).data, status=status.HTTP_201_CREATED)
+        # Trials are discontinued
+        return Response({"detail": "Trial is no longer available"}, status=status.HTTP_404_NOT_FOUND)

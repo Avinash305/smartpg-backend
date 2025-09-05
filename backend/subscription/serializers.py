@@ -18,24 +18,13 @@ class SubscriptionPlanSerializer(serializers.ModelSerializer):
 
 class SubscriptionSerializer(serializers.ModelSerializer):
     plan = SubscriptionPlanSerializer(read_only=True)
-    is_trial = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Subscription
         fields = [
             'id', 'owner', 'plan', 'status', 'billing_interval', 'current_period_start', 'current_period_end',
-            'trial_end', 'cancel_at_period_end', 'is_current', 'meta', 'created_at', 'updated_at', 'is_trial'
+            'trial_end', 'cancel_at_period_end', 'is_current', 'meta', 'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'owner', 'status', 'is_current', 'created_at', 'updated_at', 'is_trial'
+            'owner', 'status', 'is_current', 'created_at', 'updated_at'
         ]
-
-    def get_is_trial(self, obj: Subscription) -> bool:
-        try:
-            if (obj.status or '').lower() != 'trialing':
-                return False
-            if obj.trial_end and obj.trial_end <= timezone.now():
-                return False
-            return True
-        except Exception:
-            return False

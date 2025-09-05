@@ -67,7 +67,6 @@ class SubscriptionPlan(models.Model):
 
 class Subscription(models.Model):
     STATUS_CHOICES = (
-        ("trialing", "Trialing"),
         ("active", "Active"),
         ("past_due", "Past due"),
         ("canceled", "Canceled"),
@@ -88,7 +87,7 @@ class Subscription(models.Model):
         related_name="subscriptions",
     )
 
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="trialing", db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active", db_index=True)
     # Store interval as a flexible code, e.g., '1m','3m','6m','12m'
     billing_interval = models.CharField(max_length=10, default="1m")
 

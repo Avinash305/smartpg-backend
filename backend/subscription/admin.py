@@ -369,6 +369,25 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
     limits_summary.short_description = 'Limits'
 
 
+class FreeMonthFilter(admin.SimpleListFilter):
+    title = 'Free month'
+    parameter_name = 'free_month'
+
+    def lookups(self, request, model_admin):
+        return (
+            ('yes', 'Yes'),
+            ('no', 'No'),
+        )
+
+    def queryset(self, request, queryset):
+        val = self.value()
+        if val == 'yes':
+            return queryset.filter(meta__free_month=True)
+        if val == 'no':
+            return queryset.exclude(meta__free_month=True)
+        return queryset
+
+
 class SubscriptionAdminForm(forms.ModelForm):
     class Meta:
         model = Subscription
@@ -397,10 +416,11 @@ class SubscriptionAdmin(admin.ModelAdmin):
 
     list_display = (
         'owner', 'plan', 'status', 'billing_interval', 'is_current', 'cancel_at_period_end',
-        'current_period_start', 'current_period_end', 'trial_end', 'created_at',
+        'current_period_start', 'current_period_end', 'is_free_month', 'free_ends_at', 'limits_preview', 'created_at',
     )
     list_filter = (
         'status', 'is_current', 'cancel_at_period_end', 'plan',
+        FreeMonthFilter,
     )
     search_fields = (
         'owner__email', 'owner__username', 'plan__name', 'plan__slug'
@@ -410,6 +430,47 @@ class SubscriptionAdmin(admin.ModelAdmin):
     date_hierarchy = 'created_at'
     ordering = ('owner_id', '-created_at')
     readonly_fields = ('created_at', 'updated_at')
+
+    def is_free_month(self, obj):
+        try:
+            return bool(isinstance(obj.meta, dict) and obj.meta.get('free_month'))
+        except Exception:
+            return False
+
+    is_free_month.boolean = True
+    is_free_month.short_description = 'Free month'
+
+    def free_ends_at(self, obj):
+        try:
+            if self.is_free_month(obj):
+                # Prefer current period end when available
+                return obj.current_period_end
+            return None
+        except Exception:
+            return None
+
+    free_ends_at.short_description = 'Free ends'
+
+    def limits_preview(self, obj):
+        try:
+            lims = {}
+            if isinstance(obj.meta, dict):
+                cand = obj.meta.get('limits')
+                if isinstance(cand, dict):
+                    lims = cand
+            if not lims:
+                return '—'
+            keys = ['buildings', 'staff', 'floors', 'rooms', 'beds', 'tenants']
+            parts = []
+            for k in keys:
+                if k in lims:
+                    v = lims.get(k)
+                    parts.append(f"{k}:{'∞' if v is None else v}")
+            return ", ".join(parts) if parts else '—'
+        except Exception:
+            return '—'
+
+    limits_preview.short_description = 'Limits (subset)'
 
 
 @admin.register(Coupon)
