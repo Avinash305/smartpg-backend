@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Booking, Payment, BookingMovement
+from .models import Booking, Payment, BookingMovement, BookingMedia
 
 class TenantMiniSerializer(serializers.Serializer):
     id = serializers.IntegerField()
@@ -138,3 +138,17 @@ class PaymentSerializer(serializers.ModelSerializer):
             "created_at", "created_by", "updated_at", "updated_by",
         ]
         read_only_fields = ["created_at", "created_by", "updated_at", "updated_by"]
+
+class BookingMediaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BookingMedia
+        fields = [
+            "id",
+            "booking",
+            "file",
+            "file_size",
+            "content_type",
+            "created_at",
+            "created_by",
+        ]
+        read_only_fields = ["file_size", "content_type", "created_at", "created_by"]

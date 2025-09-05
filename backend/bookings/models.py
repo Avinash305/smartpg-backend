@@ -331,6 +331,37 @@ class BookingMovement(TimeStampedModel):
         return f"Move for booking {self.booking_id} at {self.moved_at}"
 
 
+# --- Media attached to a Booking ---
+class BookingMedia(TimeStampedModel):
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name="media")
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="booking_media")
+    file = models.FileField(upload_to="booking_media/%Y/%m/%d/")
+    file_size = models.BigIntegerField(default=0)
+    content_type = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["booking"]),
+            models.Index(fields=["owner"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        # Auto-populate size and content_type if available
+        try:
+            if self.file and hasattr(self.file, "size"):
+                self.file_size = int(self.file.size or 0)
+        except Exception:
+            pass
+        try:
+            ct = getattr(getattr(self.file, "file", None), "content_type", None) or getattr(self.file, "content_type", None)
+            if ct:
+                self.content_type = str(ct)
+        except Exception:
+            pass
+        super().save(*args, **kwargs)
+
+
 # ---- Helpers to keep Bed.status in sync with Bookings and Stays ----
 def _recompute_bed_status(bed_id: int):
     if not bed_id:

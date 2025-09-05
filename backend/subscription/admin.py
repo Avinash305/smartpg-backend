@@ -292,7 +292,7 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
 
     list_display = (
         'name', 'slug', 'currency', 'price_monthly', 'price_yearly', 'is_active',
-        'price_summary', 'features_summary', 'limits_summary', 'created_at',
+        'price_summary', 'features_summary', 'limits_summary', 'discount_window', 'created_at',
     )
     list_filter = ('is_active', 'currency')
     search_fields = ('name', 'slug')
@@ -300,43 +300,37 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at', 'updated_at')
     prepopulated_fields = {"slug": ("name",)}
     list_editable = ('is_active',)
+    actions = ('make_active', 'make_inactive')
 
-    fieldsets = (
-        ('General', {
-            'fields': ('name', 'slug', 'currency', 'is_active'),
-        }),
-        ('Legacy pricing (fallbacks)', {
-            'fields': ('price_monthly', 'price_yearly'),
-            'classes': ('collapse',),
-            'description': 'Optional legacy fields used as fallbacks if flexible prices are not set.',
-        }),
-        ('Flexible billing', {
-            'fields': ('available_intervals', 'price_1m', 'price_3m', 'price_6m', 'price_12m'),
-            'description': 'Choose allowed intervals and set per-interval prices.',
-        }),
-        ('Plan discount (auto-applied before coupons)', {
-            'fields': (
-                'discount_active', 'discount_type', 'discount_value', 'discount_currency',
-                'discount_valid_from', 'discount_valid_until', 'discount_allowed_intervals', 'discount_description',
-            ),
-            'description': 'Configure optional plan-level discount. For percent, value is 0-100. For fixed amount, currency must match plan currency at checkout.',
-        }),
-        ('Features & Limits', {
-            'fields': (
-                'features_choices', 'features_new_keys',
-                'limit_buildings_unlimited', 'limit_buildings_count',
-                'limit_staff_unlimited', 'limit_staff_count',
-                'limit_tenants_unlimited', 'limit_tenants_count',
-                'limit_storage_mb_unlimited', 'limit_storage_mb_count',
-                'limits_kv',
-            ),
-            'description': 'Tick features to enable. To add new feature keys, type them separated by spaces/commas. For limits, use key=value per line; leave value blank for unlimited.',
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',),
-        }),
-    )
+    def discount_window(self, obj: SubscriptionPlan):
+        try:
+            if getattr(obj, 'discount_active', False):
+                start = getattr(obj, 'discount_valid_from', None)
+                end = getattr(obj, 'discount_valid_until', None)
+                if start and end:
+                    return f"{start:%Y-%m-%d} → {end:%Y-%m-%d}"
+                if start:
+                    return f"from {start:%Y-%m-%d}"
+                if end:
+                    return f"until {end:%Y-%m-%d}"
+                return 'active'
+            return '—'
+        except Exception:
+            return '—'
+
+    discount_window.short_description = 'Discount window'
+
+    def make_active(self, request, queryset):
+        updated = queryset.update(is_active=True)
+        self.message_user(request, f"Activated {updated} plan(s)")
+
+    make_active.short_description = 'Activate selected plans'
+
+    def make_inactive(self, request, queryset):
+        updated = queryset.update(is_active=False)
+        self.message_user(request, f"Deactivated {updated} plan(s)")
+
+    make_inactive.short_description = 'Deactivate selected plans'
 
     def price_summary(self, obj: SubscriptionPlan):
         pm = obj.prices or {}
@@ -362,7 +356,7 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
             return "—"
         parts = []
         for k in sorted(lim.keys()):
-            v = lim[k]
+            v = lim.get(k)
             parts.append(f"{k}:{v if v is not None else '∞'}")
         return ", ".join(parts)
 
@@ -419,7 +413,7 @@ class SubscriptionAdmin(admin.ModelAdmin):
         'current_period_start', 'current_period_end', 'is_free_month', 'free_ends_at', 'limits_preview', 'created_at',
     )
     list_filter = (
-        'status', 'is_current', 'cancel_at_period_end', 'plan',
+        'status', 'is_current', 'cancel_at_period_end', 'plan', 'billing_interval',
         FreeMonthFilter,
     )
     search_fields = (
@@ -430,6 +424,7 @@ class SubscriptionAdmin(admin.ModelAdmin):
     date_hierarchy = 'created_at'
     ordering = ('owner_id', '-created_at')
     readonly_fields = ('created_at', 'updated_at')
+    actions = ('set_as_current', 'set_cancel_at_period_end', 'unset_cancel_at_period_end')
 
     def is_free_month(self, obj):
         try:
@@ -471,6 +466,31 @@ class SubscriptionAdmin(admin.ModelAdmin):
             return '—'
 
     limits_preview.short_description = 'Limits (subset)'
+
+    def set_as_current(self, request, queryset):
+        count = 0
+        for sub in queryset.select_related('owner'):
+            # Unset others for this owner
+            Subscription.objects.filter(owner=sub.owner).update(is_current=False)
+            # Set this one current
+            sub.is_current = True
+            sub.save(update_fields=['is_current'])
+            count += 1
+        self.message_user(request, f"Marked {count} subscription(s) as current (unset others for each owner)")
+
+    set_as_current.short_description = 'Mark as current (unset others for owner)'
+
+    def set_cancel_at_period_end(self, request, queryset):
+        updated = queryset.update(cancel_at_period_end=True)
+        self.message_user(request, f"Set cancel at period end on {updated} subscription(s)")
+
+    set_cancel_at_period_end.short_description = 'Set cancel at period end'
+
+    def unset_cancel_at_period_end(self, request, queryset):
+        updated = queryset.update(cancel_at_period_end=False)
+        self.message_user(request, f"Unset cancel at period end on {updated} subscription(s)")
+
+    unset_cancel_at_period_end.short_description = 'Unset cancel at period end'
 
 
 @admin.register(Coupon)

@@ -4,10 +4,14 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.dateparse import parse_date
 from django.utils import timezone
-from subscription.utils import ensure_feature
+from subscription.utils import ensure_feature, enforce_booking_media_upload_limits
+from django.db.models import Sum
+from rest_framework import status
+from rest_framework.response import Response
+from django.shortcuts import get_object_or_404
 
-from .models import Booking, Payment, BookingMovement
-from .serializers import BookingSerializer, PaymentSerializer
+from .models import Booking, Payment, BookingMovement, BookingMedia
+from .serializers import BookingSerializer, PaymentSerializer, BookingMediaSerializer
 
 
 class BookingViewSet(viewsets.ModelViewSet):
@@ -233,3 +237,74 @@ class PaymentViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as e:
             detail = e.message_dict if hasattr(e, "message_dict") else {"detail": e.messages if hasattr(e, "messages") else str(e)}
             raise DRFValidationError(detail)
+
+
+class BookingMediaViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = BookingMediaSerializer
+    queryset = BookingMedia.objects.all().select_related('booking', 'owner').order_by('-created_at')
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = getattr(self.request, 'user', None)
+        if not user or not user.is_authenticated:
+            return qs.none()
+        if not user.is_superuser:
+            role = getattr(user, 'role', None)
+            if role == 'pg_admin':
+                qs = qs.filter(owner=user)
+            elif role == 'pg_staff' and getattr(user, 'pg_admin_id', None):
+                qs = qs.filter(owner_id=user.pg_admin_id)
+            else:
+                return qs.none()
+        booking_id = self.request.query_params.get('booking')
+        if booking_id:
+            qs = qs.filter(booking_id=booking_id)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        # Require subscription feature
+        ensure_feature(request.user, 'bookings')
+
+        booking_id = request.data.get('booking') or request.query_params.get('booking')
+        if not booking_id:
+            raise DRFValidationError({'booking': 'booking is required'})
+
+        booking = get_object_or_404(Booking, id=booking_id)
+
+        # Ownership isolation: booking must belong to the same owner
+        user = request.user
+        if not user.is_superuser:
+            role = getattr(user, 'role', None)
+            owner_id = getattr(booking.building, 'owner_id', None)
+            if role == 'pg_admin' and owner_id != user.id:
+                return Response({'detail': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+            if role == 'pg_staff' and getattr(user, 'pg_admin_id', None) != owner_id:
+                return Response({'detail': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+        file_obj = request.FILES.get('file')
+        if not file_obj:
+            return Response({'detail': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        current_qs = BookingMedia.objects.filter(booking=booking)
+        current_file_count = current_qs.count()
+        current_total_bytes = current_qs.aggregate(s=Sum('file_size')).get('s') or 0
+
+        # Enforce limits
+        enforce_booking_media_upload_limits(
+            user=user,
+            booking=booking,
+            file_obj=file_obj,
+            current_file_count=current_file_count,
+            current_total_bytes=current_total_bytes,
+        )
+
+        media = BookingMedia.objects.create(
+            booking=booking,
+            owner=user if getattr(user, 'role', None) != 'pg_staff' else getattr(user, 'pg_admin', user),
+            file=file_obj,
+        )
+
+        serializer = self.get_serializer(media)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)

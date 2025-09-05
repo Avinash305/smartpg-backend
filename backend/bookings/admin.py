@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Booking, Payment, BookingMovement
+from .models import Booking, Payment, BookingMovement, BookingMedia
 
 
 # Register your models here.
@@ -10,6 +10,14 @@ class PaymentInline(admin.TabularInline):
     fields = ("amount", "method", "status", "paid_on", "reference")
     readonly_fields = ()
     ordering = ("-paid_on",)
+
+
+class BookingMediaInline(admin.TabularInline):
+    model = BookingMedia
+    extra = 0
+    fields = ("file", "file_size", "content_type", "created_at")
+    readonly_fields = ("file_size", "content_type", "created_at")
+    ordering = ("-created_at",)
 
 
 @admin.register(Booking)
@@ -48,7 +56,7 @@ class BookingAdmin(admin.ModelAdmin):
     date_hierarchy = "booked_at"
     autocomplete_fields = ("tenant", "building", "floor", "room", "bed", "booked_by")
     list_select_related = ("tenant", "building", "floor", "room", "bed", "booked_by")
-    inlines = [PaymentInline]
+    inlines = [BookingMediaInline, PaymentInline]
 
 
 @admin.register(Payment)
@@ -114,3 +122,26 @@ class BookingMovementAdmin(admin.ModelAdmin):
         "to_bed",
         "moved_by",
     )
+
+
+@admin.register(BookingMedia)
+class BookingMediaAdmin(admin.ModelAdmin):
+    list_display = ("id", "booking", "owner", "file_name", "file_size", "content_type", "created_at")
+    list_filter = ("content_type", "created_at")
+    search_fields = (
+        "booking__id",
+        "booking__tenant__full_name",
+        "owner__username",
+        "owner__email",
+    )
+    readonly_fields = ("file_size", "content_type", "created_at")
+    autocomplete_fields = ("booking", "owner")
+    list_select_related = ("booking", "owner")
+    ordering = ("-created_at",)
+
+    def file_name(self, obj):
+        try:
+            return getattr(getattr(obj.file, 'name', None), 'split', lambda x: None)('/')[-1] if obj.file else ''
+        except Exception:
+            return str(obj.file) if obj.file else ''
+    file_name.short_description = 'File'

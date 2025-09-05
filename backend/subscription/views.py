@@ -58,51 +58,7 @@ class CurrentSubscriptionView(APIView):
             except Exception:
                 pass
         if not sub:
-            # One-time default 1-month free subscription for first-time owners
-            if not Subscription.objects.filter(owner=owner).exists():
-                plan = SubscriptionPlan.objects.filter(is_active=True).order_by('price_monthly', 'id').first()
-                if not plan:
-                    return Response({'detail': 'No active plans available'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
-                now = timezone.now()
-                period_end = compute_period_end(now, '1m')
-                # Prepare strict free-month limits
-                base_limits = dict(plan.limits or {})
-                free_limits = dict(base_limits)
-                free_limits.update({
-                    'buildings': 1,
-                    'max_buildings': 1,
-                    'staff': 1,
-                    'max_staff': 1,
-                    'floors': 5,
-                    'max_floors': 5,
-                    'rooms': 5,
-                    'max_rooms': 5,
-                    'beds': 5,
-                    'max_beds': 5,
-                    'tenants': 100,
-                    'max_tenants': 100,
-                })
-                with transaction.atomic():
-                    sub = Subscription.objects.create(
-                        owner=owner,
-                        plan=plan,
-                        status='active',
-                        billing_interval='1m',
-                        current_period_start=now,
-                        current_period_end=period_end,
-                        trial_end=None,
-                        cancel_at_period_end=False,
-                        is_current=True,
-                        meta={
-                            'free_month': True,
-                            'free_started_at': now.isoformat(),
-                            'free_ends_at': period_end.isoformat(),
-                            'features': dict(plan.features or {}),
-                            'limits': free_limits,
-                        },
-                    )
-            else:
-                return Response({'detail': 'No current subscription'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'detail': 'No current subscription'}, status=status.HTTP_404_NOT_FOUND)
         # Enforce only active subscriptions as valid "current"
         try:
             now = timezone.now()

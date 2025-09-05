@@ -370,3 +370,88 @@ def apply_plan_discount(amount: Decimal, currency: str, plan: SubscriptionPlan, 
     if final_amt < 0:
         final_amt = Decimal('0')
     return final_amt.quantize(Decimal('0.01')), discount.quantize(Decimal('0.01'))
+
+# ---------------- Subscription limits helpers (bookings media) ----------------
+from django.core.exceptions import PermissionDenied
+
+def _get_current_subscription_and_limits(user):
+    """
+    Return (subscription, limits_dict) for the current owner.
+    If no current subscription, returns (None, {}).
+    """
+    from .models import Subscription
+    sub = (
+        Subscription.objects
+        .select_related('plan')
+        .filter(owner=user, is_current=True)
+        .first()
+    )
+    return sub, (getattr(getattr(sub, 'plan', None), 'limits', None) or {})
+
+def get_limit_value(limits: dict, dotted_key: str, default=None):
+    """Fetch nested limit value like 'bookings_media.max_file_bytes' from a dict."""
+    node = limits or {}
+    for part in str(dotted_key).split('.'):
+        if not isinstance(node, dict):
+            return default
+        if part not in node:
+            return default
+        node = node.get(part)
+    return default if node is None else node
+
+def enforce_booking_media_upload_limits(user, booking, file_obj, current_file_count: int, current_total_bytes: int):
+    """
+    Enforce bookings media limits from subscription plan:
+    - bookings_media.allowed_mime_prefixes (comma-separated): e.g. 'image/,application/pdf'
+    - bookings_media.max_file_bytes
+    - bookings_media.max_files_per_booking
+    - bookings_media.max_total_bytes_per_booking
+    - storage_mb (global cap, optional)
+    Raises PermissionDenied with a user-safe message if a limit is exceeded.
+    """
+    from django.db.models import Sum
+
+    sub, limits = _get_current_subscription_and_limits(user)
+    if not sub:
+        raise PermissionDenied('No active subscription')
+
+    # Allowed MIME types by prefix
+    allowed = get_limit_value(limits, 'bookings_media.allowed_mime_prefixes', default=None)
+    if allowed:
+        prefixes = [p.strip().lower() for p in str(allowed).split(',') if p.strip()]
+        mime = (getattr(file_obj, 'content_type', '') or '').lower()
+        if mime and prefixes and not any(mime.startswith(p) for p in prefixes):
+            raise PermissionDenied('File type not allowed for your plan')
+
+    # Per-file size
+    max_file_bytes = get_limit_value(limits, 'bookings_media.max_file_bytes', default=None)
+    file_size = getattr(file_obj, 'size', None)
+    if max_file_bytes is not None and file_size is not None and int(file_size) > int(max_file_bytes):
+        raise PermissionDenied('File exceeds per-file size limit')
+
+    # Per-booking file count
+    max_files = get_limit_value(limits, 'bookings_media.max_files_per_booking', default=None)
+    if max_files is not None and int(current_file_count) + 1 > int(max_files):
+        raise PermissionDenied('You have reached the maximum number of files for this booking')
+
+    # Per-booking total bytes
+    max_total = get_limit_value(limits, 'bookings_media.max_total_bytes_per_booking', default=None)
+    if max_total is not None and file_size is not None and int(current_total_bytes) + int(file_size) > int(max_total):
+        raise PermissionDenied('This upload exceeds your per-booking storage limit')
+
+    # Global storage cap in MB (optional)
+    storage_mb = get_limit_value(limits, 'storage_mb', default=None)
+    if storage_mb is not None and file_size is not None:
+        try:
+            from bookings.models import BookingMedia
+            used_bytes = (BookingMedia.objects
+                          .filter(owner=user)
+                          .aggregate(s=Sum('file_size'))
+                          .get('s') or 0)
+            if int(used_bytes) + int(file_size) > int(storage_mb) * 1024 * 1024:
+                raise PermissionDenied('You have reached your plan storage limit')
+        except Exception:
+            # If the aggregate fails for any reason, do not hard-block here
+            pass
+
+    return True

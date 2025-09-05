@@ -60,11 +60,14 @@ class CustomUserAdmin(UserAdmin):
     form = CustomUserChangeForm
     add_form = CustomUserCreationForm
     
-    list_display = ('email', 'full_name', 'role', 'pg_admin', 'is_staff', 'is_active', 'last_login', 'password_reset_sent')
+    list_display = (
+        'email', 'full_name', 'role', 'pg_admin', 'is_staff', 'is_active',
+        'has_logged_in', 'last_login', 'reset_email_sent', 'password_reset_sent'
+    )
     list_filter = ('role', 'is_staff', 'is_active', 'last_login')
     search_fields = ('email', 'full_name', 'phone')
     ordering = ('-date_joined',)
-    readonly_fields = ('last_login', 'date_joined', 'password_reset_sent', 'hierarchical_id')
+    readonly_fields = ('last_login', 'date_joined', 'password_reset_sent_at', 'hierarchical_id')
     
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
@@ -86,7 +89,7 @@ class CustomUserAdmin(UserAdmin):
             'fields': (
                 'last_login', 
                 'date_joined',
-                'password_reset_sent',
+                'password_reset_sent_at',
                 'hierarchical_id'
             ),
         }),
@@ -135,6 +138,18 @@ class CustomUserAdmin(UserAdmin):
             return obj.password_reset_sent_at.strftime('%Y-%m-%d %H:%M:%S')
         return "Never"
     password_reset_sent.short_description = 'Password Reset Sent'
+    
+    # Boolean checkmark: has the user ever logged in?
+    def has_logged_in(self, obj):
+        return bool(obj.last_login)
+    has_logged_in.boolean = True
+    has_logged_in.short_description = 'Has logged in'
+    
+    # Boolean checkmark: has a password reset email been sent?
+    def reset_email_sent(self, obj):
+        return bool(getattr(obj, 'password_reset_sent_at', None))
+    reset_email_sent.boolean = True
+    reset_email_sent.short_description = 'Reset email sent'
     
     def send_password_reset_email(self, request, queryset):
         for user in queryset:
