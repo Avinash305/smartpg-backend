@@ -47,7 +47,7 @@ if not DEBUG and not ALLOWED_HOSTS:
 
 CORS_ALLOWED_ORIGINS = [
     *(o.strip() for o in os.getenv(
-        'CORS_ALLOWED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,https://smartpg.netlify.app, https://smartpg-backend.onrender.com, "smartpg-backend.onrender.com",',
+        'CORS_ALLOWED_ORIGINS', 'http://localhost:5173, http://127.0.0.1:5173, https://smartpg.netlify.app, https://smartpg-backend.onrender.com, smartpg-backend.onrender.com',
     ).split(',') if o.strip())
 ]
 # Allow sending cookies with CORS if explicitly enabled via env
@@ -55,7 +55,7 @@ CORS_ALLOW_CREDENTIALS = os.getenv('CORS_ALLOW_CREDENTIALS', 'False').lower() ==
 
 CSRF_TRUSTED_ORIGINS = [
     *(o.strip() for o in os.getenv(
-        'CSRF_TRUSTED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,https://smartpg.netlify.app, https://smartpg-backend.onrender.com, "smartpg-backend.onrender.com"'
+        'CSRF_TRUSTED_ORIGINS', 'http://localhost:5173, http://127.0.0.1:5173, https://smartpg.netlify.app, https://smartpg-backend.onrender.com, smartpg-backend.onrender.com'
     ).split(',') if o.strip())
 ]
 
