@@ -60,6 +60,9 @@ class SubscriptionPlanAdminForm(forms.ModelForm):
     bm_max_file_bytes = forms.IntegerField(required=False, min_value=0, label='Bookings media: Max file size (bytes)')
     bm_max_total_bytes_per_booking = forms.IntegerField(required=False, min_value=0, label='Bookings media: Max total per booking (bytes)')
     bm_allowed_mime_prefixes = forms.CharField(required=False, label='Bookings media: Allowed MIME prefixes', help_text="Comma-separated prefixes, e.g. 'image/,application/pdf'")
+    # Tenants media (per-tenant count)
+    limit_tenant_media_per_tenant_unlimited = forms.BooleanField(required=False, label='Tenant media per tenant: Unlimited')
+    limit_tenant_media_per_tenant_count = forms.IntegerField(required=False, min_value=0, label='Tenant media per tenant: Count')
     available_intervals = forms.MultipleChoiceField(
         required=False,
         choices=(('1m', '1 month'), ('3m', '3 months'), ('6m', '6 months'), ('12m', '12 months')),
@@ -163,6 +166,8 @@ class SubscriptionPlanAdminForm(forms.ModelForm):
         init_limit_pair('rooms', 'limit_rooms_unlimited', 'limit_rooms_count')
         init_limit_pair('beds', 'limit_beds_unlimited', 'limit_beds_count')
         init_limit_pair('bookings', 'limit_bookings_unlimited', 'limit_bookings_count')
+        # Tenants media per-tenant count
+        init_limit_pair('max_tenant_media_per_tenant', 'limit_tenant_media_per_tenant_unlimited', 'limit_tenant_media_per_tenant_count')
         # Nested helpers for limits like invoices.max_per_month and bookings_media.*
         def get_nested(dct: dict, dotted: str, default=None):
             node = dct
@@ -268,6 +273,8 @@ class SubscriptionPlanAdminForm(forms.ModelForm):
         apply_pair('rooms', 'limit_rooms_unlimited', 'limit_rooms_count', 'Rooms')
         apply_pair('beds', 'limit_beds_unlimited', 'limit_beds_count', 'Beds')
         apply_pair('bookings', 'limit_bookings_unlimited', 'limit_bookings_count', 'Bookings')
+        # Tenants media per-tenant count
+        apply_pair('max_tenant_media_per_tenant', 'limit_tenant_media_per_tenant_unlimited', 'limit_tenant_media_per_tenant_count', 'Tenant media per tenant')
 
         # Nested setter
         def set_nested(dct: dict, dotted: str, value):
