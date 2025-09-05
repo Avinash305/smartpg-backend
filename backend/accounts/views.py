@@ -263,7 +263,11 @@ class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
         old_name = getattr(old_file, 'name', None)
 
         if sets_non_empty:
-            ensure_feature(request.user, 'staff_media')
+            try:
+                ensure_feature(request.user, 'staff_media')
+            except PermissionDenied:
+                # Show a friendly, specific message for the UI
+                raise PermissionDenied('Upgrade plan to upload profile picture.')
 
         # Perform save first
         serializer.save()

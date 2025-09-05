@@ -45,6 +45,19 @@ class SubscriptionPlanAdminForm(forms.ModelForm):
     limit_tenants_count = forms.IntegerField(required=False, min_value=0, label='Tenants: Count')
     limit_storage_mb_unlimited = forms.BooleanField(required=False, label='Storage (MB): Unlimited')
     limit_storage_mb_count = forms.IntegerField(required=False, min_value=0, label='Storage (MB): Count')
+    limit_floors_unlimited = forms.BooleanField(required=False, label='Floors: Unlimited')
+    limit_floors_count = forms.IntegerField(required=False, min_value=0, label='Floors: Count')
+    limit_rooms_unlimited = forms.BooleanField(required=False, label='Rooms: Unlimited')
+    limit_rooms_count = forms.IntegerField(required=False, min_value=0, label='Rooms: Count')
+    limit_beds_unlimited = forms.BooleanField(required=False, label='Beds: Unlimited')
+    limit_beds_count = forms.IntegerField(required=False, min_value=0, label='Beds: Count')
+    limit_invoices_per_month_unlimited = forms.BooleanField(required=False, label='Invoices/month: Unlimited')
+    limit_invoices_per_month_count = forms.IntegerField(required=False, min_value=0, label='Invoices/month: Count')
+    bm_max_files_unlimited = forms.BooleanField(required=False, label='Bookings media: Files per booking Unlimited')
+    bm_max_files_count = forms.IntegerField(required=False, min_value=0, label='Bookings media: Files per booking Count')
+    bm_max_file_bytes = forms.IntegerField(required=False, min_value=0, label='Bookings media: Max file size (bytes)')
+    bm_max_total_bytes_per_booking = forms.IntegerField(required=False, min_value=0, label='Bookings media: Max total per booking (bytes)')
+    bm_allowed_mime_prefixes = forms.CharField(required=False, label='Bookings media: Allowed MIME prefixes', help_text="Comma-separated prefixes, e.g. 'image/,application/pdf'")
     available_intervals = forms.MultipleChoiceField(
         required=False,
         choices=(('1m', '1 month'), ('3m', '3 months'), ('6m', '6 months'), ('12m', '12 months')),
@@ -144,6 +157,38 @@ class SubscriptionPlanAdminForm(forms.ModelForm):
         init_limit_pair('staff', 'limit_staff_unlimited', 'limit_staff_count')
         init_limit_pair('tenants', 'limit_tenants_unlimited', 'limit_tenants_count')
         init_limit_pair('storage_mb', 'limit_storage_mb_unlimited', 'limit_storage_mb_count')
+        init_limit_pair('floors', 'limit_floors_unlimited', 'limit_floors_count')
+        init_limit_pair('rooms', 'limit_rooms_unlimited', 'limit_rooms_count')
+        init_limit_pair('beds', 'limit_beds_unlimited', 'limit_beds_count')
+        # Nested helpers for limits like invoices.max_per_month and bookings_media.*
+        def get_nested(dct: dict, dotted: str, default=None):
+            node = dct
+            for part in str(dotted).split('.'):
+                if not isinstance(node, dict) or part not in node:
+                    return default
+                node = node.get(part)
+            return node if node is not None else default
+        # Invoices/month
+        inv = get_nested(lims, 'invoices.max_per_month', default=None)
+        if inv is None and 'invoices' in lims:
+            self.fields['limit_invoices_per_month_unlimited'].initial = True
+        elif inv is not None:
+            try:
+                self.fields['limit_invoices_per_month_count'].initial = int(inv)
+            except Exception:
+                self.fields['limit_invoices_per_month_count'].initial = None
+        # Bookings media
+        bm_max_files = get_nested(lims, 'bookings_media.max_files_per_booking', default=None)
+        if bm_max_files is None and 'bookings_media' in lims:
+            self.fields['bm_max_files_unlimited'].initial = True
+        elif bm_max_files is not None:
+            try:
+                self.fields['bm_max_files_count'].initial = int(bm_max_files)
+            except Exception:
+                self.fields['bm_max_files_count'].initial = None
+        self.fields['bm_max_file_bytes'].initial = get_nested(lims, 'bookings_media.max_file_bytes', default=None)
+        self.fields['bm_max_total_bytes_per_booking'].initial = get_nested(lims, 'bookings_media.max_total_bytes_per_booking', default=None)
+        self.fields['bm_allowed_mime_prefixes'].initial = get_nested(lims, 'bookings_media.allowed_mime_prefixes', default=None)
         # Pre-fill discount fields from instance
         inst = self.instance
         if getattr(inst, 'pk', None):
@@ -216,6 +261,71 @@ class SubscriptionPlanAdminForm(forms.ModelForm):
         apply_pair('staff', 'limit_staff_unlimited', 'limit_staff_count', 'Staff')
         apply_pair('tenants', 'limit_tenants_unlimited', 'limit_tenants_count', 'Tenants')
         apply_pair('storage_mb', 'limit_storage_mb_unlimited', 'limit_storage_mb_count', 'Storage (MB)')
+        apply_pair('floors', 'limit_floors_unlimited', 'limit_floors_count', 'Floors')
+        apply_pair('rooms', 'limit_rooms_unlimited', 'limit_rooms_count', 'Rooms')
+        apply_pair('beds', 'limit_beds_unlimited', 'limit_beds_count', 'Beds')
+
+        # Nested setter
+        def set_nested(dct: dict, dotted: str, value):
+            parts = str(dotted).split('.')
+            node = dct
+            for p in parts[:-1]:
+                if p not in node or not isinstance(node[p], dict):
+                    node[p] = {}
+                node = node[p]
+            node[parts[-1]] = value
+
+        # Invoices/month
+        if cleaned.get('limit_invoices_per_month_unlimited'):
+            set_nested(limits, 'invoices.max_per_month', None)
+        else:
+            inv_cnt = cleaned.get('limit_invoices_per_month_count')
+            if inv_cnt not in (None, ''):
+                try:
+                    iv = int(inv_cnt)
+                except Exception:
+                    raise ValidationError({'limit_invoices_per_month_count': 'Invoices/month must be an integer'})
+                if iv < 0:
+                    raise ValidationError({'limit_invoices_per_month_count': 'Invoices/month cannot be negative'})
+                set_nested(limits, 'invoices.max_per_month', iv)
+
+        # Bookings media
+        if cleaned.get('bm_max_files_unlimited'):
+            set_nested(limits, 'bookings_media.max_files_per_booking', None)
+        else:
+            bm_files = cleaned.get('bm_max_files_count')
+            if bm_files not in (None, ''):
+                try:
+                    iv = int(bm_files)
+                except Exception:
+                    raise ValidationError({'bm_max_files_count': 'Files per booking must be an integer'})
+                if iv < 0:
+                    raise ValidationError({'bm_max_files_count': 'Files per booking cannot be negative'})
+                set_nested(limits, 'bookings_media.max_files_per_booking', iv)
+
+        bm_file_bytes = cleaned.get('bm_max_file_bytes')
+        if bm_file_bytes not in (None, ''):
+            try:
+                iv = int(bm_file_bytes)
+            except Exception:
+                raise ValidationError({'bm_max_file_bytes': 'Max file size must be an integer (bytes)'})
+            if iv < 0:
+                raise ValidationError({'bm_max_file_bytes': 'Max file size cannot be negative'})
+            set_nested(limits, 'bookings_media.max_file_bytes', iv)
+
+        bm_total_bytes = cleaned.get('bm_max_total_bytes_per_booking')
+        if bm_total_bytes not in (None, ''):
+            try:
+                iv = int(bm_total_bytes)
+            except Exception:
+                raise ValidationError({'bm_max_total_bytes_per_booking': 'Max total per booking must be an integer (bytes)'})
+            if iv < 0:
+                raise ValidationError({'bm_max_total_bytes_per_booking': 'Max total per booking cannot be negative'})
+            set_nested(limits, 'bookings_media.max_total_bytes_per_booking', iv)
+
+        mime_prefixes = (cleaned.get('bm_allowed_mime_prefixes') or '').strip()
+        if mime_prefixes:
+            set_nested(limits, 'bookings_media.allowed_mime_prefixes', mime_prefixes)
         cleaned['limits'] = limits
 
         # Validate available_intervals: subset of supported values
@@ -460,7 +570,7 @@ class SubscriptionAdmin(admin.ModelAdmin):
             for k in keys:
                 if k in lims:
                     v = lims.get(k)
-                    parts.append(f"{k}:{'∞' if v is None else v}")
+                    parts.append(f"{k}:{v if v is not None else '∞'}")
             return ", ".join(parts) if parts else '—'
         except Exception:
             return '—'
