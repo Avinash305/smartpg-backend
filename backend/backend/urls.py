@@ -26,6 +26,8 @@ def health_view(_request):
         'status': 'ok',
         'app': 'pg-management-backend',
         'debug': settings.DEBUG,
+        'serve_media': bool(getattr(settings, 'SERVE_MEDIA', False)),
+        'media_url': getattr(settings, 'MEDIA_URL', None),
     })
 
 urlpatterns = [
