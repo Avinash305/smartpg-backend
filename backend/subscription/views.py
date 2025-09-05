@@ -31,7 +31,7 @@ def _Building():
     return apps.get_model('properties', 'Building')
 
 class PlansList(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
 
     def get(self, request):
         plans = SubscriptionPlan.objects.filter(is_active=True).order_by('price_monthly', 'id')
