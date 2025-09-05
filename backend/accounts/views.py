@@ -632,7 +632,21 @@ class LocalizationSettingsViewSet(viewsets.ModelViewSet):
         qs = self.get_queryset()
         obj = qs.first()
         if not obj:
-            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+            # If the requesting user is a PG Admin, auto-create defaults
+            try:
+                user = request.user
+                if getattr(user, 'role', None) == 'pg_admin':
+                    obj = LocalizationSettings.objects.create(
+                        owner=user,
+                        timezone='Asia/Kolkata',
+                        date_format='dd-MM-yyyy',
+                        time_format='hh:mm a',
+                    )
+                else:
+                    # For staff or others, keep 404 to avoid creating for non-owners implicitly
+                    return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+            except Exception:
+                return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
         ser = self.get_serializer(obj)
         return Response(ser.data)
 
